@@ -34,11 +34,13 @@ export const AUDIT_SEEK_OPTIONS = {
 } as const;
 
 // Geometry-only seek for the dense content_overlap grid: getBoundingClientRect is valid synchronously after setTime, so drop all post-seek waits (rAF/font/sleep) that would multiply across the dense grid.
+// That includes the seek barrier, which holds until a video's frame lands: ~185 ms a seek for a 1080p H.264 clip.
 export const DENSE_GEOMETRY_SEEK_OPTIONS = {
   ...AUDIT_SEEK_OPTIONS,
   animationFrameSettle: "none",
   waitForFontsMs: 0,
   settleMs: 0,
+  waitForSeekCompletion: false,
 } as const;
 
 export interface SeekCompositionTimelineOptions {
@@ -48,6 +50,8 @@ export interface SeekCompositionTimelineOptions {
   animationFrameSettle?: "race" | "double" | "none";
   waitForFontsMs?: number;
   settleMs?: number;
+  /** Await the runtime's seek barrier (media frames landed, paints captured). On unless false. */
+  waitForSeekCompletion?: boolean;
 }
 
 type CompositionPageFunction =
@@ -339,12 +343,14 @@ export async function seekCompositionTimeline(
     options.exactTime === true,
   );
 
-  await page.evaluate(async () => {
-    const waitForCompletion = Reflect.get(window, "__hfWaitForSeekCompletion");
-    if (typeof waitForCompletion === "function") {
-      await Reflect.apply(waitForCompletion, window, []);
-    }
-  });
+  if (options.waitForSeekCompletion !== false) {
+    await page.evaluate(async () => {
+      const waitForCompletion = Reflect.get(window, "__hfWaitForSeekCompletion");
+      if (typeof waitForCompletion === "function") {
+        await Reflect.apply(waitForCompletion, window, []);
+      }
+    });
+  }
 
   const animationFrameSettle = options.animationFrameSettle ?? "race";
   if (animationFrameSettle === "race") {
